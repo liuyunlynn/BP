@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>5cb77bfe-49d4-4da1-9693-d3570067794c</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Microsoft.Graph.Communications.Calls" Version="1.2.0.17950" />
+    <PackageReference Include="Microsoft.Graph.Communications.Client" Version="1.2.0.17950" />
+  </ItemGroup>
+
+</Project>
