@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using Microsoft.Graph.Communications.Calls;
 using Microsoft.Graph.Communications.Client;
 using Microsoft.Graph.Communications.Common.Telemetry;
@@ -21,18 +23,22 @@ public sealed class CallingBotService
     private readonly BotOptions _options;
     private readonly ILogger<CallingBotService> _logger;
     private readonly ICommunicationsClient _client;
+    private readonly GraphTokenProvider _tokenProvider;
+    private readonly HttpClient _httpClient;
 
     /// <summary>All calls the bot is currently joined to, keyed by call id.</summary>
     private readonly ConcurrentDictionary<string, ICall> _calls = new(StringComparer.OrdinalIgnoreCase);
 
-    public CallingBotService(BotOptions options, ILogger<CallingBotService> logger)
+    public CallingBotService(BotOptions options, IHttpClientFactory httpClientFactory, ILogger<CallingBotService> logger)
     {
         _options = options;
         _logger = logger;
+        _tokenProvider = new GraphTokenProvider(options);
+        _httpClient = httpClientFactory.CreateClient(nameof(CallingBotService));
 
         IGraphLogger graphLogger = new GraphLogger(options.AppName);
         ICommunicationsClientBuilder builder = new CommunicationsClientBuilder(options.AppName, options.AppId, graphLogger);
-        builder.SetAuthentication(options.AppId, new GraphTokenProvider(options));
+        builder.SetAuthentication(options.AppId, _tokenProvider);
         builder.SetNotificationUrl(options.CallbackUri);
         builder.SetServiceBaseUrl(new Uri("https://graph.microsoft.com/v1.0"));
         _client = builder.Build();
@@ -103,6 +109,68 @@ public sealed class CallingBotService
     public IReadOnlyList<string> GetActiveCallIds() => _calls.Keys.ToArray();
 
     /// <summary>
+    /// Calls the Microsoft Graph REST endpoint for the participants in a call.
+    /// The raw response is preserved so experimental fields such as metadata are
+    /// not discarded by the local participant projection.
+    /// </summary>
+    public async Task<GraphApiResponse> GetParticipantsViaGraphAsync(string callId, CancellationToken cancellationToken)
+    {
+        string accessToken = await _tokenProvider.AcquireTokenAsync(_options.TenantId).ConfigureAwait(false);
+        string requestUri =
+            $"https://graph.microsoft.com/v1.0/communications/calls/{Uri.EscapeDataString(callId)}/participants";
+
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        string content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string contentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "Graph participant request for call '{CallId}' failed with status '{StatusCode}'.",
+                callId,
+                (int)response.StatusCode);
+        }
+        else
+        {
+            LogParticipantMetadata(callId, content);
+        }
+
+        return new GraphApiResponse((int)response.StatusCode, contentType, content);
+    }
+
+    private void LogParticipantMetadata(string callId, string content)
+    {
+        using JsonDocument document = JsonDocument.Parse(content);
+        if (!document.RootElement.TryGetProperty("value", out JsonElement participants)
+            || participants.ValueKind != JsonValueKind.Array)
+        {
+            _logger.LogWarning("Graph participant response for call '{CallId}' did not contain a value array.", callId);
+            return;
+        }
+
+        foreach (JsonElement participant in participants.EnumerateArray())
+        {
+            string participantId = participant.TryGetProperty("id", out JsonElement id)
+                ? id.GetString() ?? "(no-id)"
+                : "(no-id)";
+
+            string metadata = participant.TryGetProperty("metadata", out JsonElement metadataElement)
+                ? metadataElement.GetRawText()
+                : "(not present)";
+
+            _logger.LogInformation(
+                "Call '{CallId}' participant '{ParticipantId}' metadata: {Metadata}",
+                callId,
+                participantId,
+                metadata);
+        }
+    }
+
+    /// <summary>
     /// Returns a snapshot of the participants in the specified call only,
     /// including the bot itself (which appears as an application participant).
     /// Returns <c>null</c> if the bot is not in a call with that id.
@@ -146,6 +214,8 @@ public sealed class CallingBotService
         }
     }
 }
+
+public sealed record GraphApiResponse(int StatusCode, string ContentType, string Content);
 
 /// <summary>A flattened, printable view of a meeting participant.</summary>
 public sealed record ParticipantSnapshot(string DisplayName, string Id, string Kind, bool IsMuted, bool IsInLobby)

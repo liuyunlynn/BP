@@ -98,6 +98,7 @@ TeamsMeetingBotPoc/
 | `GraphTokenProvider.cs` | `ITokenProvider` using `ClientSecretCredential`, scope `graph/.default`. |
 | `JoinUrlParser.cs` | Extracts `threadId`, `Tid`, `Oid` from `joinWebUrl`. |
 | `CallingBotService.cs` | Core: builds `ICommunicationsClient`, `JoinMeetingAsync`, `ListParticipants`, `PrintRoster`, `LeaveMeetingAsync`; `OnParticipantsUpdated` handler; `ParticipantSnapshot` mapping. |
+| `PARTICIPANT_METADATA_TEST.md` | Direct Graph participant API and metadata console logging verification guide. |
 | `HttpTranslation.cs` | Converts ASP.NET Core `HttpRequest`/`HttpResponse` ↔ `HttpRequestMessage`/`HttpResponseMessage`. |
 | `Program.cs` | Minimal-API host + endpoints. |
 
@@ -113,6 +114,7 @@ TeamsMeetingBotPoc/
 | `POST /join?joinUrl=<url>` | Have the bot join an **existing** meeting by its join URL. Returns `{ callId }`. |
 | `GET /calls` | List the ids of every meeting the bot is currently in. Returns `{ callIds: [...] }`. |
 | `GET /participants/{callId}` | Return the live roster **for that one call** as JSON **and** print it to the bot console. `404` if the id isn't an active call. |
+| `GET /participants-rest/{callId}` | Call Graph `GET /v1.0/communications/calls/{id}/participants` directly and return its raw response, including `metadata` when present. |
 | `POST /leave/{callId}` | Bot leaves **that one** meeting. `404` if the id isn't an active call. |
 
 The bot can be in **multiple meetings at once** — every call is tracked independently by its

@@ -52,6 +52,10 @@ curl.exe -s -X POST "http://localhost:5275/schedule-and-join?minutes=30&subject=
 # list the live participants for THAT call (also prints to the bot console):
 curl.exe -s "http://localhost:5275/participants/<callId>"
 
+# call GET /v1.0/communications/calls/{id}/participants directly and inspect
+# the raw Graph response, including metadata when a participant publishes it:
+curl.exe -s "http://localhost:5275/participants-rest/<callId>"
+
 # optional — every meeting the bot is currently in:
 curl.exe -s "http://localhost:5275/calls"
 ```

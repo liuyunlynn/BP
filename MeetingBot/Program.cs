@@ -65,6 +65,13 @@ app.MapGet("/participants/{callId}", (CallingBotService bot, string callId) =>
     return Results.Ok(new { callId, participants });
 });
 
+// Call the Graph REST API directly and return its unmodified participant payload.
+app.MapGet("/participants-rest/{callId}", async (CallingBotService bot, string callId, CancellationToken cancellationToken) =>
+{
+    GraphApiResponse response = await bot.GetParticipantsViaGraphAsync(callId, cancellationToken);
+    return Results.Content(response.Content, response.ContentType, statusCode: response.StatusCode);
+});
+
 // Leave ONE specific meeting by call id.
 app.MapPost("/leave/{callId}", async (CallingBotService bot, string callId, CancellationToken cancellationToken) =>
 {
