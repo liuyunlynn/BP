@@ -161,7 +161,7 @@ public sealed record ParticipantSnapshot(string DisplayName, string Id, string K
             || (identity?.AdditionalData?.ContainsKey("applicationInstance") ?? false);
 
         Identity? effective = user ?? application ?? device;
-        string displayName = effective?.DisplayName ?? "(unknown)";
+        string displayName = effective?.DisplayName ?? (identity?.AdditionalData?["guest"] as Identity)?.DisplayName ?? "(unknown)";
         string id = effective?.Id ?? resource?.Id ?? "(no-id)";
         string kind = isApplication ? "application/bot" : user is not null ? "user" : "other";
 
