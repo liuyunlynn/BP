@@ -32,12 +32,17 @@ app.MapPost("/schedule-and-join", async (CallingBotService bot, MeetingScheduler
     DateTimeOffset end = start.AddMinutes(minutes ?? 30);
 
     ScheduledMeeting meeting = await scheduler.ScheduleMeetingAsync(subject ?? "Meeting Bot POC", start, end, cancellationToken);
-    string callId = await bot.JoinMeetingAsync(meeting.JoinWebUrl!, cancellationToken);
+    string joinWebUrl = meeting.JoinWebUrl
+        ?? throw new InvalidOperationException("The scheduled meeting did not include a join URL.");
+    string threadId = JoinUrlParser.Parse(joinWebUrl).ChatInfo.ThreadId
+        ?? throw new FormatException("The meeting join URL did not include a thread ID.");
+    string callId = await bot.JoinMeetingAsync(joinWebUrl, cancellationToken);
 
     return Results.Ok(new
     {
         meetingId = meeting.Id,
-        joinWebUrl = meeting.JoinWebUrl,
+        threadId,
+        joinWebUrl,
         callId,
     });
 });
@@ -51,6 +56,22 @@ app.MapPost("/join", async (CallingBotService bot, string joinUrl, CancellationT
 
 // List the ids of every call the bot is currently joined to.
 app.MapGet("/calls", (CallingBotService bot) => Results.Ok(new { callIds = bot.GetActiveCallIds() }));
+
+// Determine whether an ISV bot joined a meeting. This returns a mock result until Kusto is available.
+app.MapPost("/join-status", (IsvBotJoinStatusRequest request) =>
+{
+    if (string.IsNullOrWhiteSpace(request.ThreadId) || string.IsNullOrWhiteSpace(request.customApplicationTokenAppId))
+    {
+        return Results.BadRequest(new { error = "threadId and customApplicationTokenAppId are required." });
+    }
+
+    return Results.Ok(new
+    {
+        request.ThreadId,
+        request.customApplicationTokenAppId,
+        isJoined = true,
+    });
+});
 
 // List (and print) the participant roster for ONE specific call.
 app.MapGet("/participants/{callId}", (CallingBotService bot, string callId) =>
@@ -75,3 +96,5 @@ app.MapPost("/leave/{callId}", async (CallingBotService bot, string callId, Canc
 });
 
 app.Run();
+
+internal sealed record IsvBotJoinStatusRequest(string ThreadId, string customApplicationTokenAppId);
