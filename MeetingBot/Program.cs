@@ -1,3 +1,5 @@
+using Azure.Core;
+using Azure.Identity;
 using MeetingBot;
 using Microsoft.Graph.Communications.Client;
 
@@ -6,9 +8,14 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 // Bind BotOptions from configuration (appsettings.json / user-secrets / env vars).
 BotOptions botOptions = new BotOptions();
 builder.Configuration.GetSection("Bot").Bind(botOptions);
+KustoOptions kustoOptions = new KustoOptions();
+builder.Configuration.GetSection("Kusto").Bind(kustoOptions);
 
 builder.Services.AddSingleton(botOptions);
+builder.Services.AddSingleton(kustoOptions);
+builder.Services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient<KustoJoinStatusService>();
 builder.Services.AddSingleton<MeetingScheduler>();
 builder.Services.AddSingleton<CallingBotService>();
 
@@ -57,19 +64,24 @@ app.MapPost("/join", async (CallingBotService bot, string joinUrl, CancellationT
 // List the ids of every call the bot is currently joined to.
 app.MapGet("/calls", (CallingBotService bot) => Results.Ok(new { callIds = bot.GetActiveCallIds() }));
 
-// Determine whether an ISV bot joined a meeting. This returns a mock result until Kusto is available.
-app.MapPost("/join-status", (IsvBotJoinStatusRequest request) =>
+// Determine whether an ISV bot joined a meeting based on Kusto telemetry.
+app.MapPost("/join-status", async (IsvBotJoinStatusRequest request, KustoJoinStatusService joinStatus, CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.ThreadId) || string.IsNullOrWhiteSpace(request.customApplicationTokenAppId))
     {
         return Results.BadRequest(new { error = "threadId and customApplicationTokenAppId are required." });
     }
 
+    bool isJoined = await joinStatus.IsJoinedAsync(
+        request.ThreadId,
+        request.customApplicationTokenAppId,
+        cancellationToken);
+
     return Results.Ok(new
     {
         request.ThreadId,
         request.customApplicationTokenAppId,
-        isJoined = true,
+        isJoined,
     });
 });
 
