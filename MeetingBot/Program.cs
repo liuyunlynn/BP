@@ -72,7 +72,7 @@ app.MapPost("/join-status", async (IsvBotJoinStatusRequest request, KustoJoinSta
         return Results.BadRequest(new { error = "threadId and customApplicationTokenAppId are required." });
     }
 
-    bool isJoined = await joinStatus.IsJoinedAsync(
+    DateTimeOffset? eventTime = await joinStatus.GetJoinEventTimeAsync(
         request.ThreadId,
         request.customApplicationTokenAppId,
         cancellationToken);
@@ -81,7 +81,8 @@ app.MapPost("/join-status", async (IsvBotJoinStatusRequest request, KustoJoinSta
     {
         request.ThreadId,
         request.customApplicationTokenAppId,
-        isJoined,
+        isJoined = eventTime.HasValue,
+        eventTime,
     });
 });
 

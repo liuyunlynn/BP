@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -13,8 +14,8 @@ public sealed class KustoJoinStatusService
         declare query_parameters(p_threadId:string, p_applicationId:string);
         PT_CMD_scenarions
         | where threadId == p_threadId and customApplicationTokenAppId == p_applicationId
-        | take 1
-        | project isJoined = true
+        | top 1 by EventInfo_Time asc
+        | project eventTime = EventInfo_Time
         """;
 
     private readonly HttpClient _httpClient;
@@ -28,7 +29,7 @@ public sealed class KustoJoinStatusService
         _options = options;
     }
 
-    public async Task<bool> IsJoinedAsync(
+    public async Task<DateTimeOffset?> GetJoinEventTimeAsync(
         string threadId,
         string customApplicationTokenAppId,
         CancellationToken cancellationToken)
@@ -82,10 +83,10 @@ public sealed class KustoJoinStatusService
         }
 
         using JsonDocument document = JsonDocument.Parse(responseBody);
-        return HasPrimaryResultRow(document.RootElement);
+        return GetPrimaryResultEventTime(document.RootElement);
     }
 
-    private static bool HasPrimaryResultRow(JsonElement root)
+    private static DateTimeOffset? GetPrimaryResultEventTime(JsonElement root)
     {
         if (root.ValueKind == JsonValueKind.Array)
         {
@@ -95,7 +96,7 @@ public sealed class KustoJoinStatusService
                     && tableKind.ValueEquals("PrimaryResult")
                     && frame.TryGetProperty("Rows", out JsonElement rows))
                 {
-                    return rows.GetArrayLength() > 0;
+                    return GetEventTime(frame, rows);
                 }
             }
         }
@@ -109,11 +110,61 @@ public sealed class KustoJoinStatusService
                     && tableName.ValueEquals("PrimaryResult")
                     && table.TryGetProperty("Rows", out JsonElement rows))
                 {
-                    return rows.GetArrayLength() > 0;
+                    return GetEventTime(table, rows);
                 }
             }
         }
 
         throw new InvalidOperationException("Kusto response did not contain a primary result table.");
+    }
+
+    private static DateTimeOffset? GetEventTime(JsonElement table, JsonElement rows)
+    {
+        if (rows.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        if (!table.TryGetProperty("Columns", out JsonElement columns))
+        {
+            throw new InvalidOperationException("Kusto primary result table did not contain column metadata.");
+        }
+
+        int eventTimeIndex = -1;
+        int index = 0;
+        foreach (JsonElement column in columns.EnumerateArray())
+        {
+            if (column.TryGetProperty("ColumnName", out JsonElement columnName)
+                && string.Equals(columnName.GetString(), "eventTime", StringComparison.OrdinalIgnoreCase))
+            {
+                eventTimeIndex = index;
+                break;
+            }
+
+            index++;
+        }
+
+        if (eventTimeIndex < 0)
+        {
+            throw new InvalidOperationException("Kusto primary result table did not contain the eventTime column.");
+        }
+
+        JsonElement row = rows[0];
+        if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() <= eventTimeIndex)
+        {
+            throw new InvalidOperationException("Kusto primary result row did not contain an eventTime value.");
+        }
+
+        string? rawEventTime = row[eventTimeIndex].GetString();
+        if (!DateTimeOffset.TryParse(
+                rawEventTime,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTimeOffset eventTime))
+        {
+            throw new InvalidOperationException("Kusto primary result row contained an invalid eventTime value.");
+        }
+
+        return eventTime;
     }
 }
