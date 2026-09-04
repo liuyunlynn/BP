@@ -62,6 +62,7 @@ app.MapPost("/join-status", async (IsvBotJoinStatusRequest request, CallingBotSe
         return Results.Ok(new
         {
             meetingFound = false,
+            meetingOpened = false,
             isJoined = false,
             eventTime = (DateTimeOffset?)null,
             meetingUrl = (string?)null,
@@ -80,6 +81,7 @@ app.MapPost("/join-status", async (IsvBotJoinStatusRequest request, CallingBotSe
     return Results.Ok(new
     {
         meetingFound = true,
+        meetingOpened = meeting.MeetingOpened,
         isJoined = eventTime.HasValue,
         eventTime,
         meetingUrl = meeting.MeetingOpened ? null : meeting.JoinWebUrl,
