@@ -10,20 +10,16 @@ namespace MeetingBot;
 /// <summary>
 /// Wraps the Microsoft Graph Communications calling client. Responsible for:
 /// building the stateful client, joining meetings as a service-hosted-media
-/// (roster-only) bot, and exposing the live participant roster.
-///
-/// The bot can be in <b>multiple meetings simultaneously</b>. Every active call
-/// is tracked independently in <see cref="_calls"/>, keyed by its call id, so
-/// roster reads and leaves always target one specific call.
+/// bot, and processing call notifications.
 /// </summary>
 public sealed class CallingBotService
 {
+    private static readonly TimeSpan VerificationMeetingLifetime = TimeSpan.FromHours(24);
     private readonly BotOptions _options;
     private readonly ILogger<CallingBotService> _logger;
     private readonly ICommunicationsClient _client;
-
-    /// <summary>All calls the bot is currently joined to, keyed by call id.</summary>
-    private readonly ConcurrentDictionary<string, ICall> _calls = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, VerificationMeetingRecord> _verificationMeetings =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public CallingBotService(BotOptions options, ILogger<CallingBotService> logger)
     {
@@ -41,11 +37,63 @@ public sealed class CallingBotService
     /// <summary>The underlying client, used by the notification controller.</summary>
     public ICommunicationsClient Client => _client;
 
+    public void StoreVerificationMeeting(string appId, string joinWebUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(joinWebUrl);
+
+        RemoveExpiredVerificationMeetings();
+        string threadId = JoinUrlParser.Parse(joinWebUrl).ChatInfo.ThreadId
+            ?? throw new FormatException("The meeting join URL did not include a thread ID.");
+        _verificationMeetings[appId] = new VerificationMeetingRecord(
+            threadId,
+            joinWebUrl,
+            DateTimeOffset.UtcNow,
+            MeetingOpened: false);
+    }
+
+    public bool TryGetVerificationMeeting(string appId, out VerificationMeetingRecord meeting)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+
+        RemoveExpiredVerificationMeetings();
+        return _verificationMeetings.TryGetValue(appId, out meeting!);
+    }
+
+    public void RemoveVerificationMeeting(string appId, VerificationMeetingRecord meeting)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        ArgumentNullException.ThrowIfNull(meeting);
+
+        ((ICollection<KeyValuePair<string, VerificationMeetingRecord>>)_verificationMeetings)
+            .Remove(new KeyValuePair<string, VerificationMeetingRecord>(appId, meeting));
+    }
+
+    public bool MarkVerificationMeetingOpened(string appId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+
+        RemoveExpiredVerificationMeetings();
+        while (_verificationMeetings.TryGetValue(appId, out VerificationMeetingRecord? meeting))
+        {
+            if (meeting.MeetingOpened)
+            {
+                return true;
+            }
+
+            if (_verificationMeetings.TryUpdate(appId, meeting with { MeetingOpened = true }, meeting))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Joins the meeting identified by <paramref name="joinWebUrl"/> as a
-    /// service-hosted-media bot (no audio/video processing — roster only).
-    /// Returns the id of the newly created call, used to scope later roster
-    /// reads and the leave request.
+    /// service-hosted-media bot (no audio/video processing).
+    /// Returns the id of the newly created call.
     /// </summary>
     public async Task<string> JoinMeetingAsync(string joinWebUrl, CancellationToken cancellationToken)
     {
@@ -66,110 +114,26 @@ public sealed class CallingBotService
         ICall call = await _client.Calls().AddAsync(joinParameters, Guid.NewGuid(), cancellationToken).ConfigureAwait(false);
         string callId = call.Id;
 
-        _calls[callId] = call;
-
-        // Roster changes for THIS call print that call's roster only.
-        call.Participants.OnUpdated += (sender, args) => PrintRoster(callId);
-
-        // Auto-clean the entry when the call terminates so ended calls don't leak.
-        call.OnUpdated += (sender, args) =>
-        {
-            if (sender.Resource?.State == CallState.Terminated)
-            {
-                _calls.TryRemove(callId, out _);
-                _logger.LogInformation("Call '{CallId}' terminated; removed from active calls.", callId);
-            }
-        };
-
-        _logger.LogInformation("Join request sent. Call id '{CallId}'. Active calls: {Count}.", callId, _calls.Count);
+        _logger.LogInformation("Join request sent. Call id '{CallId}'.", callId);
         return callId;
     }
 
-    /// <summary>Leaves the specified meeting, if the bot is in it.</summary>
-    /// <returns><c>true</c> if a matching active call was found and left.</returns>
-    public async Task<bool> LeaveMeetingAsync(string callId, CancellationToken cancellationToken)
+    private void RemoveExpiredVerificationMeetings()
     {
-        if (string.IsNullOrWhiteSpace(callId) || !_calls.TryRemove(callId, out ICall? call))
+        DateTimeOffset expirationThreshold = DateTimeOffset.UtcNow - VerificationMeetingLifetime;
+        foreach ((string appId, VerificationMeetingRecord meeting) in _verificationMeetings)
         {
-            return false;
-        }
-
-        await call.DeleteAsync().ConfigureAwait(false);
-        _logger.LogInformation("Left meeting. Call id '{CallId}'. Active calls: {Count}.", callId, _calls.Count);
-        return true;
-    }
-
-    /// <summary>The ids of all calls the bot is currently joined to.</summary>
-    public IReadOnlyList<string> GetActiveCallIds() => _calls.Keys.ToArray();
-
-    /// <summary>
-    /// Returns a snapshot of the participants in the specified call only,
-    /// including the bot itself (which appears as an application participant).
-    /// Returns <c>null</c> if the bot is not in a call with that id.
-    /// </summary>
-    public IReadOnlyList<ParticipantSnapshot>? ListParticipants(string callId)
-    {
-        if (string.IsNullOrWhiteSpace(callId) || !_calls.TryGetValue(callId, out ICall? call))
-        {
-            return null;
-        }
-
-        List<ParticipantSnapshot> snapshots = new List<ParticipantSnapshot>();
-        foreach (IParticipant participant in call.Participants)
-        {
-            snapshots.Add(ParticipantSnapshot.From(participant.Resource));
-        }
-
-        return snapshots;
-    }
-
-    /// <summary>Prints the roster of the specified call to the logger.</summary>
-    public void PrintRoster(string callId)
-    {
-        IReadOnlyList<ParticipantSnapshot>? participants = ListParticipants(callId);
-        if (participants is null)
-        {
-            _logger.LogWarning("PrintRoster called for unknown call id '{CallId}'.", callId);
-            return;
-        }
-
-        _logger.LogInformation("Call '{CallId}' roster: {Count} participant(s).", callId, participants.Count);
-        foreach (ParticipantSnapshot participant in participants)
-        {
-            _logger.LogInformation(
-                "  - '{DisplayName}' (id '{Id}', kind '{Kind}', muted '{Muted}', inLobby '{InLobby}').",
-                participant.DisplayName,
-                participant.Id,
-                participant.Kind,
-                participant.IsMuted,
-                participant.IsInLobby);
+            if (meeting.CreatedAt <= expirationThreshold)
+            {
+                ((ICollection<KeyValuePair<string, VerificationMeetingRecord>>)_verificationMeetings)
+                    .Remove(new KeyValuePair<string, VerificationMeetingRecord>(appId, meeting));
+            }
         }
     }
 }
 
-/// <summary>A flattened, printable view of a meeting participant.</summary>
-public sealed record ParticipantSnapshot(string DisplayName, string Id, string Kind, bool IsMuted, bool IsInLobby)
-{
-    public static ParticipantSnapshot From(Participant? resource)
-    {
-        IdentitySet? identity = resource?.Info?.Identity;
-        Identity? user = identity?.User;
-        Identity? application = identity?.Application;
-        Identity? device = identity?.Device;
-
-        bool isApplication = application is not null
-            || (identity?.AdditionalData?.ContainsKey("applicationInstance") ?? false);
-
-        Identity? effective = user ?? application ?? device;
-        string displayName = effective?.DisplayName ?? (identity?.AdditionalData?["guest"] as Identity)?.DisplayName ?? "(unknown)";
-        string id = effective?.Id ?? resource?.Id ?? "(no-id)";
-        string kind = isApplication ? "application/bot" : user is not null ? "user" : "other";
-
-        return new ParticipantSnapshot(
-            displayName,
-            id,
-            kind,
-            resource?.IsMuted ?? false,
-            resource?.IsInLobby ?? false);
-    }
-}
+public sealed record VerificationMeetingRecord(
+    string ThreadId,
+    string JoinWebUrl,
+    DateTimeOffset CreatedAt,
+    bool MeetingOpened);

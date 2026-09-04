@@ -97,7 +97,7 @@ TeamsMeetingBotPoc/
 | `MeetingScheduler.cs` | `POST /users/{id}/onlineMeetings` via `ClientSecretCredential` → `ScheduledMeeting {Id, Subject, JoinWebUrl}`. |
 | `GraphTokenProvider.cs` | `ITokenProvider` using `ClientSecretCredential`, scope `graph/.default`. |
 | `JoinUrlParser.cs` | Extracts `threadId`, `Tid`, `Oid` from `joinWebUrl`. |
-| `CallingBotService.cs` | Core: builds `ICommunicationsClient`, `JoinMeetingAsync`, `ListParticipants`, `PrintRoster`, `LeaveMeetingAsync`; `OnParticipantsUpdated` handler; `ParticipantSnapshot` mapping. |
+| `CallingBotService.cs` | Builds the calling client, joins meetings, and keeps a unique app-ID-to-validation-meeting correlation for up to 24 hours. |
 | `HttpTranslation.cs` | Converts ASP.NET Core `HttpRequest`/`HttpResponse` ↔ `HttpRequestMessage`/`HttpResponseMessage`. |
 | `Program.cs` | Minimal-API host + endpoints. |
 
@@ -109,7 +109,8 @@ TeamsMeetingBotPoc/
 |---|---|
 | `GET /` | Health probe. Returns `{ status, callback }`. |
 | `POST /api/calling` | **Signaling webhook** — Microsoft Graph POSTs call/roster notifications here. Not called by hand. |
-| `POST /schedule-and-join?minutes=30&subject=Foo` | Schedule a new meeting **and** have the bot join it. Returns `{ meetingId, joinWebUrl, callId }`. |
+| `POST /schedule-and-join?appId=<app-id>&minutes=30&subject=Foo` | Schedule a new meeting, have the bot join it, and store the app ID correlation. Returns `{ joinWebUrl }`. |
+| `POST /join-status` | Check the stored meeting for a JSON `appId`. Returns `{ isJoined, eventTime, meetingUrl }`; removes the record after Kusto confirms the join. |
 | `POST /join?joinUrl=<url>` | Have the bot join an **existing** meeting by its join URL. Returns `{ callId }`. |
 | `GET /calls` | List the ids of every meeting the bot is currently in. Returns `{ callIds: [...] }`. |
 | `GET /participants/{callId}` | Return the live roster **for that one call** as JSON **and** print it to the bot console. `404` if the id isn't an active call. |
@@ -192,8 +193,8 @@ dotnet run
 
 ### Terminal 3 — drive the demo
 ```powershell
-# 1) schedule a meeting AND have the bot join it (note the returned callId):
-curl.exe -s -X POST "http://localhost:5275/schedule-and-join?minutes=30&subject=RosterTest"
+# 1) schedule a meeting AND have the bot join it:
+curl.exe -s -X POST "http://localhost:5275/schedule-and-join?appId=<app-id>&minutes=30&subject=RosterTest"
 
 # 2) a REAL user (the organizer) opens the returned joinWebUrl and joins,
 #    so the meeting session actually starts.

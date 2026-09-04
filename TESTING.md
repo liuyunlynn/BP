@@ -43,8 +43,8 @@ Watch this console — roster changes are logged here.
 
 ### 5. Schedule + join, then read the roster
 ```powershell
-# schedule a new meeting AND have the bot join it (capture the returned callId):
-curl.exe -s -X POST "http://localhost:5275/schedule-and-join?minutes=30&subject=RosterTest"
+# schedule a new meeting AND have the bot join it:
+curl.exe -s -X POST "http://localhost:5275/schedule-and-join?appId=<app-id>&minutes=30&subject=RosterTest"
 
 # a REAL user (the organizer) must now open the returned joinWebUrl and join,
 # so the meeting session actually starts.

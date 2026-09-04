@@ -21,9 +21,6 @@ builder.Services.AddSingleton<CallingBotService>();
 
 WebApplication app = builder.Build();
 
-// Health probe.
-app.MapGet("/", () => Results.Ok(new { status = "ok", callback = botOptions.CallbackPath }));
-
 // Signaling callback: Microsoft Graph POSTs call/roster notifications here.
 app.MapPost(botOptions.CallbackPath, async (HttpContext context, CallingBotService bot) =>
 {
@@ -32,82 +29,76 @@ app.MapPost(botOptions.CallbackPath, async (HttpContext context, CallingBotServi
     await responseMessage.CopyToAsync(context.Response);
 });
 
-// Demo endpoint: schedule a meeting, then have the bot join it.
-app.MapPost("/schedule-and-join", async (CallingBotService bot, MeetingScheduler scheduler, int? minutes, string? subject, CancellationToken cancellationToken) =>
+// Schedule a meeting, have the bot join it, and retain the app-to-meeting correlation for validation.
+app.MapPost("/schedule-and-join", async (CallingBotService bot, MeetingScheduler scheduler, string? appId, int? minutes, string? subject, CancellationToken cancellationToken) =>
 {
+    if (string.IsNullOrWhiteSpace(appId))
+    {
+        return Results.BadRequest(new { error = "appId is required." });
+    }
+
     DateTimeOffset start = DateTimeOffset.UtcNow.AddMinutes(1);
     DateTimeOffset end = start.AddMinutes(minutes ?? 30);
 
     ScheduledMeeting meeting = await scheduler.ScheduleMeetingAsync(subject ?? "Meeting Bot POC", start, end, cancellationToken);
     string joinWebUrl = meeting.JoinWebUrl
         ?? throw new InvalidOperationException("The scheduled meeting did not include a join URL.");
-    string threadId = JoinUrlParser.Parse(joinWebUrl).ChatInfo.ThreadId
-        ?? throw new FormatException("The meeting join URL did not include a thread ID.");
-    string callId = await bot.JoinMeetingAsync(joinWebUrl, cancellationToken);
+    await bot.JoinMeetingAsync(joinWebUrl, cancellationToken);
+    bot.StoreVerificationMeeting(appId, joinWebUrl);
 
-    return Results.Ok(new
-    {
-        meetingId = meeting.Id,
-        threadId,
-        joinWebUrl,
-        callId,
-    });
+    return Results.Ok(new { joinWebUrl });
 });
-
-// Have the bot join an already-existing meeting by join URL.
-app.MapPost("/join", async (CallingBotService bot, string joinUrl, CancellationToken cancellationToken) =>
-{
-    string callId = await bot.JoinMeetingAsync(joinUrl, cancellationToken);
-    return Results.Ok(new { callId });
-});
-
-// List the ids of every call the bot is currently joined to.
-app.MapGet("/calls", (CallingBotService bot) => Results.Ok(new { callIds = bot.GetActiveCallIds() }));
 
 // Determine whether an ISV bot joined a meeting based on Kusto telemetry.
-app.MapPost("/join-status", async (IsvBotJoinStatusRequest request, KustoJoinStatusService joinStatus, CancellationToken cancellationToken) =>
+app.MapPost("/join-status", async (IsvBotJoinStatusRequest request, CallingBotService bot, KustoJoinStatusService joinStatus, CancellationToken cancellationToken) =>
 {
-    if (string.IsNullOrWhiteSpace(request.ThreadId) || string.IsNullOrWhiteSpace(request.customApplicationTokenAppId))
+    if (string.IsNullOrWhiteSpace(request.AppId))
     {
-        return Results.BadRequest(new { error = "threadId and customApplicationTokenAppId are required." });
+        return Results.BadRequest(new { error = "appId is required." });
+    }
+
+    if (!bot.TryGetVerificationMeeting(request.AppId, out VerificationMeetingRecord meeting))
+    {
+        return Results.Ok(new
+        {
+            meetingFound = false,
+            isJoined = false,
+            eventTime = (DateTimeOffset?)null,
+            meetingUrl = (string?)null,
+        });
     }
 
     DateTimeOffset? eventTime = await joinStatus.GetJoinEventTimeAsync(
-        request.ThreadId,
-        request.customApplicationTokenAppId,
+        meeting.ThreadId,
+        request.AppId,
         cancellationToken);
+    if (eventTime.HasValue)
+    {
+        bot.RemoveVerificationMeeting(request.AppId, meeting);
+    }
 
     return Results.Ok(new
     {
-        request.ThreadId,
-        request.customApplicationTokenAppId,
+        meetingFound = true,
         isJoined = eventTime.HasValue,
         eventTime,
+        meetingUrl = meeting.MeetingOpened ? null : meeting.JoinWebUrl,
     });
 });
 
-// List (and print) the participant roster for ONE specific call.
-app.MapGet("/participants/{callId}", (CallingBotService bot, string callId) =>
+// Mark a verification meeting as opened (the bot has joined the meeting).
+app.MapPost("/meeting-opened", (IsvBotJoinStatusRequest request, CallingBotService bot) =>
 {
-    IReadOnlyList<ParticipantSnapshot>? participants = bot.ListParticipants(callId);
-    if (participants is null)
+    if (string.IsNullOrWhiteSpace(request.AppId))
     {
-        return Results.NotFound(new { error = $"No active call with id '{callId}'.", activeCalls = bot.GetActiveCallIds() });
+        return Results.BadRequest(new { error = "appId is required." });
     }
 
-    bot.PrintRoster(callId);
-    return Results.Ok(new { callId, participants });
-});
-
-// Leave ONE specific meeting by call id.
-app.MapPost("/leave/{callId}", async (CallingBotService bot, string callId, CancellationToken cancellationToken) =>
-{
-    bool left = await bot.LeaveMeetingAsync(callId, cancellationToken);
-    return left
-        ? Results.Ok(new { callId, left = true })
-        : Results.NotFound(new { error = $"No active call with id '{callId}'.", activeCalls = bot.GetActiveCallIds() });
+    return bot.MarkVerificationMeetingOpened(request.AppId)
+        ? Results.Ok(new { marked = true })
+        : Results.NotFound(new { error = "No active verification meeting was found for the app ID." });
 });
 
 app.Run();
 
-internal sealed record IsvBotJoinStatusRequest(string ThreadId, string customApplicationTokenAppId);
+internal sealed record IsvBotJoinStatusRequest(string AppId);
