@@ -21,6 +21,34 @@ builder.Services.AddSingleton<CallingBotService>();
 
 WebApplication app = builder.Build();
 
+app.UseExceptionHandler(exceptionHandlerApp =>
+{
+    exceptionHandlerApp.Run(async context =>
+    {
+        Exception? exception = context.Features
+            .Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()
+            ?.Error;
+
+        Microsoft.AspNetCore.Mvc.ProblemDetails problem = new()
+        {
+            Status = StatusCodes.Status500InternalServerError,
+            Title = "An error occurred while processing the request.",
+            Detail = exception?.Message,
+            Instance = context.Request.Path,
+        };
+        problem.Extensions["traceId"] = context.TraceIdentifier;
+        problem.Extensions["exceptionType"] = exception?.GetType().FullName;
+
+        if (app.Environment.IsDevelopment())
+        {
+            problem.Extensions["stackTrace"] = exception?.StackTrace;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(problem);
+    });
+});
+
 // Signaling callback: Microsoft Graph POSTs call/roster notifications here.
 app.MapPost(botOptions.CallbackPath, async (HttpContext context, CallingBotService bot) =>
 {

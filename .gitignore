@@ -3,4 +3,4 @@ obj/
 *.user
 appsettings.Development.json
 secrets.json
-/.vs/TeamsMeetingBotPoc
+/.vs
