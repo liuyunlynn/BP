@@ -12,11 +12,12 @@ namespace MeetingBot;
 public sealed class LegalOnboardingEmailService
 {
     private const string Subject = "Teams Bot Identification Program Onboarding";
+    private const string SenderEmail = "teamsbotidprogram@microsoft.com";
     private const string AyanaEmail = "amcginnis@microsoft.com";
     private const string PartnerProgramEmail = "TeamsCategoryPartner@microsoft.com";
+    private const string YunEmail = "v-yunliu3@microsoft.com";
     private static readonly string[] GraphScope = ["https://graph.microsoft.com/.default"];
 
-    private readonly BotOptions _options;
     private readonly HttpClient _httpClient;
     private readonly ClientSecretCredential _credential;
     private readonly ILogger<LegalOnboardingEmailService> _logger;
@@ -26,7 +27,6 @@ public sealed class LegalOnboardingEmailService
         IHttpClientFactory httpClientFactory,
         ILogger<LegalOnboardingEmailService> logger)
     {
-        _options = options;
         _httpClient = httpClientFactory.CreateClient(nameof(LegalOnboardingEmailService));
         _credential = new ClientSecretCredential(options.TenantId, options.AppId, options.AppSecret);
         _logger = logger;
@@ -40,14 +40,6 @@ public sealed class LegalOnboardingEmailService
             .GetTokenAsync(new TokenRequestContext(GraphScope), cancellationToken)
             .ConfigureAwait(false);
 
-        string senderUserId = string.IsNullOrWhiteSpace(_options.EmailSenderUserId)
-            ? _options.OrganizerUserId
-            : _options.EmailSenderUserId;
-        if (string.IsNullOrWhiteSpace(senderUserId))
-        {
-            throw new InvalidOperationException("Bot:EmailSenderUserId or Bot:OrganizerUserId must be configured.");
-        }
-
         object payload = new
         {
             message = new
@@ -58,20 +50,18 @@ public sealed class LegalOnboardingEmailService
                     contentType = "HTML",
                     content = await BuildBodyAsync(email, cancellationToken).ConfigureAwait(false),
                 },
-                toRecipients = new[]
-                {
-                    Recipient(email.SignatoryEmailAddress),
-                },
+                toRecipients = email.RecipientEmailAddresses.Select(Recipient).ToArray(),
                 ccRecipients = new[]
                 {
                     Recipient(AyanaEmail),
                     Recipient(PartnerProgramEmail),
+                    Recipient(YunEmail),
                 },
             },
             saveToSentItems = true,
         };
 
-        string requestUri = $"https://graph.microsoft.com/v1.0/users/{Uri.EscapeDataString(senderUserId)}/sendMail";
+        string requestUri = $"https://graph.microsoft.com/v1.0/users/{SenderEmail}/sendMail";
         using HttpRequestMessage request = new(HttpMethod.Post, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -135,9 +125,15 @@ public sealed class LegalOnboardingEmailService
         ArgumentException.ThrowIfNullOrWhiteSpace(email.SignatoryName);
         ArgumentException.ThrowIfNullOrWhiteSpace(email.SignatoryTitle);
 
-        if (!MailAddress.TryCreate(email.SignatoryEmailAddress, out _))
+        if (email.RecipientEmailAddresses is not { Length: > 0 })
         {
-            throw new ArgumentException("A valid signatory email address is required.", nameof(email));
+            throw new ArgumentException("At least one recipient email address is required.", nameof(email));
+        }
+
+        if (!MailAddress.TryCreate(email.SignatoryEmailAddress, out _)
+            || email.RecipientEmailAddresses.Any(address => !MailAddress.TryCreate(address, out _)))
+        {
+            throw new ArgumentException("All email addresses must be valid.", nameof(email));
         }
     }
 }

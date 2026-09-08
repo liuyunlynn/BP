@@ -156,7 +156,6 @@ dotnet user-secrets set "Bot:TenantId"        "<tenant-guid>"
 dotnet user-secrets set "Bot:AppId"           "<app-guid>"
 dotnet user-secrets set "Bot:AppSecret"       "<secret>"
 dotnet user-secrets set "Bot:OrganizerUserId" "<organizer-object-id-GUID>"   # NOT the UPN
-dotnet user-secrets set "Bot:EmailSenderUserId" "<sender-mailbox-object-id-or-UPN>" # optional; defaults to OrganizerUserId
 dotnet user-secrets set "Bot:BotBaseUrl"      "https://<your-tunnel>-5275.<region>.devtunnels.ms"
 ```
 

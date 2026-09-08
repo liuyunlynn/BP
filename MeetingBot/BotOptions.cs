@@ -23,12 +23,6 @@ public sealed class BotOptions
     public string OrganizerUserId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Object ID or UPN of the mailbox used to send onboarding email.
-    /// Defaults to <see cref="OrganizerUserId"/> when omitted.
-    /// </summary>
-    public string? EmailSenderUserId { get; set; }
-
-    /// <summary>
     /// Public HTTPS base URL where Microsoft Graph can reach this bot's signaling
     /// callback (e.g. https://your-tunnel.devtunnels.ms). Must terminate at /api/calling.
     /// </summary>

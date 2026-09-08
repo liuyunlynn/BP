@@ -13,5 +13,7 @@ public sealed class LegalOnboardingEmailRequest
 
     public string SignatoryEmailAddress { get; set; } = string.Empty;
 
+    public string[] RecipientEmailAddresses { get; set; } = [];
+
     public string? NonDisclosureAgreementNumber { get; set; }
 }
