@@ -134,6 +134,7 @@ The app listens on **http://localhost:5275** in dev (see `Properties/launchSetti
 **Azure / tenant setup (one-time, already done for this POC)**
 1. **App registration** with **admin-consented Graph application permissions**:
    - `OnlineMeetings.ReadWrite.All` — create the meeting
+   - `Mail.Send` — send legal onboarding email
    - `Calls.JoinGroupCall.All` — join the meeting
    - `Calls.JoinGroupCallAsGuest.All` — (optional) guest join
    - `Calls.AccessMedia.All` — *only* if switching to application-hosted media (not used here)
@@ -155,6 +156,7 @@ dotnet user-secrets set "Bot:TenantId"        "<tenant-guid>"
 dotnet user-secrets set "Bot:AppId"           "<app-guid>"
 dotnet user-secrets set "Bot:AppSecret"       "<secret>"
 dotnet user-secrets set "Bot:OrganizerUserId" "<organizer-object-id-GUID>"   # NOT the UPN
+dotnet user-secrets set "Bot:EmailSenderUserId" "<sender-mailbox-object-id-or-UPN>" # optional; defaults to OrganizerUserId
 dotnet user-secrets set "Bot:BotBaseUrl"      "https://<your-tunnel>-5275.<region>.devtunnels.ms"
 ```
 

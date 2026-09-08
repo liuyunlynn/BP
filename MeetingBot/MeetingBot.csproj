@@ -13,4 +13,10 @@
     <PackageReference Include="Microsoft.Graph.Communications.Client" Version="1.2.0.17950" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Templates\*.html"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
