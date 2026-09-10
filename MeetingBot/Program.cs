@@ -5,14 +5,17 @@ using Microsoft.Graph.Communications.Client;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-// Bind BotOptions from configuration (appsettings.json / user-secrets / env vars).
+// Bind options from configuration (appsettings.json / user-secrets / env vars).
 BotOptions botOptions = new BotOptions();
 builder.Configuration.GetSection("Bot").Bind(botOptions);
 KustoOptions kustoOptions = new KustoOptions();
 builder.Configuration.GetSection("Kusto").Bind(kustoOptions);
+LegalOnboardingEmailOptions legalOnboardingEmailOptions = new LegalOnboardingEmailOptions();
+builder.Configuration.GetSection("LegalOnboardingEmail").Bind(legalOnboardingEmailOptions);
 
 builder.Services.AddSingleton(botOptions);
 builder.Services.AddSingleton(kustoOptions);
+builder.Services.AddSingleton(legalOnboardingEmailOptions);
 builder.Services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<KustoJoinStatusService>();

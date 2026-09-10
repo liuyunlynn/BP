@@ -12,58 +12,53 @@ namespace MeetingBot;
 public sealed class LegalOnboardingEmailService
 {
     private const string Subject = "Teams Bot Identification Program Onboarding";
-    private const string SenderEmail = "teamsbotidprogram@microsoft.com";
-    private const string AyanaEmail = "amcginnis@microsoft.com";
-    private const string PartnerProgramEmail = "TeamsCategoryPartner@microsoft.com";
-    private const string YunEmail = "v-yunliu3@microsoft.com";
-    private static readonly string[] GraphScope = ["https://graph.microsoft.com/.default"];
 
     private readonly HttpClient _httpClient;
-    private readonly ClientSecretCredential _credential;
     private readonly ILogger<LegalOnboardingEmailService> _logger;
+    private readonly string _apiKey;
+    private readonly string _requestUri;
 
     public LegalOnboardingEmailService(
-        BotOptions options,
+        LegalOnboardingEmailOptions options,
+        IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
         ILogger<LegalOnboardingEmailService> logger)
     {
         _httpClient = httpClientFactory.CreateClient(nameof(LegalOnboardingEmailService));
-        _credential = new ClientSecretCredential(options.TenantId, options.AppId, options.AppSecret);
         _logger = logger;
+
+        string? apiKey =  configuration["LegalOnboardingEmail:ApiKey"]
+            ?? options.ApiKey;
+
+        _apiKey = string.IsNullOrWhiteSpace(apiKey)
+            ? throw new InvalidOperationException(
+                "LegalOnboardingEmail:ApiKey must be configured in appsettings.json or an App Service environment variable.")
+            : apiKey.Trim();
+
+        string? requestUri = configuration["LegalOnboardingEmail:RequestUri"]
+            ?? options.RequestUri;
+
+        _requestUri = string.IsNullOrWhiteSpace(requestUri)
+            ? throw new InvalidOperationException(
+                "LegalOnboardingEmail:RequestUri must be configured in appsettings.json or an App Service environment variable.")
+            : requestUri.Trim();
     }
 
     public async Task SendAsync(LegalOnboardingEmailRequest email, CancellationToken cancellationToken)
     {
         Validate(email);
 
-        AccessToken token = await _credential
-            .GetTokenAsync(new TokenRequestContext(GraphScope), cancellationToken)
-            .ConfigureAwait(false);
-
-        object payload = new
+        EmailRequest payload = new EmailRequest
         {
-            message = new
-            {
-                subject = Subject,
-                body = new
-                {
-                    contentType = "HTML",
-                    content = await BuildBodyAsync(email, cancellationToken).ConfigureAwait(false),
-                },
-                toRecipients = email.RecipientEmailAddresses.Select(Recipient).ToArray(),
-                ccRecipients = new[]
-                {
-                    Recipient(AyanaEmail),
-                    Recipient(PartnerProgramEmail),
-                    Recipient(YunEmail),
-                },
-            },
-            saveToSentItems = true,
+            To = string.Join(";", email.RecipientEmailAddresses),
+            Cc = "",
+            Subject = Subject,
+            Body = await BuildBodyAsync(email, cancellationToken).ConfigureAwait(false),
+            IsHtml = true,
         };
 
-        string requestUri = $"https://graph.microsoft.com/v1.0/users/{SenderEmail}/sendMail";
-        using HttpRequestMessage request = new(HttpMethod.Post, requestUri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+        using HttpRequestMessage request = new(HttpMethod.Post, _requestUri);
+        request.Headers.Add("x-api-key", _apiKey);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -74,19 +69,12 @@ public sealed class LegalOnboardingEmailService
                 "Failed to send legal onboarding email. Status '{StatusCode}'. Body '{Body}'.",
                 (int)response.StatusCode,
                 responseBody);
-            throw new InvalidOperationException($"Graph sendMail failed with status {(int)response.StatusCode}.");
+            throw new InvalidOperationException(
+                $"Graph sendMail failed with status {(int)response.StatusCode}: {responseBody}");
         }
 
         _logger.LogInformation("Sent legal onboarding email for company '{CompanyName}'.", email.CompanyName);
     }
-
-    private static object Recipient(string address) => new
-    {
-        emailAddress = new
-        {
-            address,
-        },
-    };
 
     private static async Task<string> BuildBodyAsync(
         LegalOnboardingEmailRequest email,
