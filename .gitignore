@@ -4,3 +4,4 @@ obj/
 appsettings.Development.json
 secrets.json
 /.vs
+/MeetingBot/Properties/PublishProfiles
