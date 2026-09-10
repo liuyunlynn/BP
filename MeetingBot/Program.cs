@@ -19,8 +19,16 @@ builder.Services.AddHttpClient<KustoJoinStatusService>();
 builder.Services.AddSingleton<MeetingScheduler>();
 builder.Services.AddSingleton<CallingBotService>();
 builder.Services.AddSingleton<LegalOnboardingEmailService>();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 WebApplication app = builder.Build();
+
+//if (app.Environment.IsDevelopment())
+//{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+//}
 
 app.UseExceptionHandler(exceptionHandlerApp =>
 {
@@ -49,6 +57,13 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         await context.Response.WriteAsJsonAsync(problem);
     });
 });
+
+app.MapGet("/", () => Results.Ok(new
+{
+    service = "MeetingBot",
+    status = "running",
+    swagger = "/swagger",
+}));
 
 // Signaling callback: Microsoft Graph POSTs call/roster notifications here.
 app.MapPost(botOptions.CallbackPath, async (HttpContext context, CallingBotService bot) =>
