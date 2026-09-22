@@ -18,7 +18,6 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<KustoJoinStatusService>();
 builder.Services.AddSingleton<MeetingScheduler>();
 builder.Services.AddSingleton<CallingBotService>();
-builder.Services.AddSingleton<LegalOnboardingEmailService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -143,16 +142,6 @@ app.MapPost("/meeting-opened", (IsvBotJoinStatusRequest request, CallingBotServi
     return bot.MarkVerificationMeetingOpened(request.AppId)
         ? Results.Ok(new { marked = true })
         : Results.NotFound(new { error = "No active verification meeting was found for the app ID." });
-});
-
-// Send the legal onboarding email after an ISV starts legal verification.
-app.MapPost("/legal-onboarding-email", async (
-    LegalOnboardingEmailRequest request,
-    LegalOnboardingEmailService emailService,
-    CancellationToken cancellationToken) =>
-{
-    await emailService.SendAsync(request, cancellationToken);
-    return Results.NoContent();
 });
 
 app.Run();

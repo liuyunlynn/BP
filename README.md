@@ -105,6 +105,8 @@ TeamsMeetingBotPoc/
 
 ## 5. HTTP endpoints
 
+Agreement acceptance is handled by the frontend. This service handles technical meeting verification.
+
 | Method + path | Purpose |
 |---|---|
 | `GET /` | Health probe. Returns `{ status, callback }`. |
@@ -134,7 +136,6 @@ The app listens on **http://localhost:5275** in dev (see `Properties/launchSetti
 **Azure / tenant setup (one-time, already done for this POC)**
 1. **App registration** with **admin-consented Graph application permissions**:
    - `OnlineMeetings.ReadWrite.All` — create the meeting
-   - `Mail.Send` — send legal onboarding email
    - `Calls.JoinGroupCall.All` — join the meeting
    - `Calls.JoinGroupCallAsGuest.All` — (optional) guest join
    - `Calls.AccessMedia.All` — *only* if switching to application-hosted media (not used here)
